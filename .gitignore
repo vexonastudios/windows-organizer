@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+release/
+out/
+
+# Environment / OS junk
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+
+# Electron-builder temp
+.electron-builder-cache/
+
+# Editor
+.vscode/
+*.suo
+*.user
+
+# Temp
+*.tmp
+*.bak

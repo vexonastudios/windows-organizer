@@ -1,0 +1,81 @@
+{
+  "name": "filekeeper",
+  "version": "1.0.0",
+  "description": "FileKeeper — Your personal PC organizer",
+  "main": "main.js",
+  "author": "James Jennings",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "electron": "electron .",
+    "preview": "vite preview",
+    "package": "vite build && electron-builder --win --x64",
+    "package:dir": "vite build && electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.jamesjennings.filekeeper",
+    "productName": "FileKeeper",
+    "copyright": "Copyright © 2026 James Jennings",
+    "icon": "assets/icon.png",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FileKeeper"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "package.json",
+      "node_modules/electron-store/**/*",
+      "node_modules/conf/**/*",
+      "node_modules/chokidar/**/*",
+      "node_modules/trash/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    }
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "electron-store": "^8.2.0",
+    "md5-file": "^5.0.0",
+    "trash": "^7.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.2.11",
+    "wait-on": "^7.2.0"
+  },
+  "keywords": []
+}
