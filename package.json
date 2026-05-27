@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "FileKeeper — Your personal PC organizer",
   "main": "main.js",
-  "author": "James Jennings",
+  "author": "Vexona Studios",
   "license": "MIT",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
@@ -14,9 +14,9 @@
     "package:dir": "vite build && electron-builder --win --x64 --dir"
   },
   "build": {
-    "appId": "com.jamesjennings.filekeeper",
+    "appId": "com.vexonastudios.filekeeper",
     "productName": "FileKeeper",
-    "copyright": "Copyright © 2026 James Jennings",
+    "copyright": "Copyright © 2026 Vexona Studios",
     "icon": "assets/icon.png",
     "win": {
       "target": [
@@ -35,13 +35,15 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FileKeeper"
+      "shortcutName": "FileKeeper",
+      "include": "build/installer.nsh"
     },
     "files": [
       "dist/**/*",
       "main.js",
       "preload.js",
       "assets/**/*",
+      "build/**/*",
       "package.json",
       "node_modules/electron-store/**/*",
       "node_modules/conf/**/*",
