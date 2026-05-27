@@ -333,7 +333,7 @@ export default function SetupWizard({ onComplete }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>🎨 Set custom folder icons</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                Each folder gets a unique colored icon in Windows Explorer — purple for sermons, red for IBH, etc.
+                Each folder gets a <strong>unique color</strong> in Windows Explorer (purple for sermons, red for IBH, amber for audiobooks…). Custom artwork is applied as a bonus on top.
               </div>
             </div>
           </div>

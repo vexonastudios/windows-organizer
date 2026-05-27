@@ -142,9 +142,11 @@ async function getStore() {
             icon: '📜',
             color: '#f59e0b',
             type: 'audiobook',
-            workingPath: 'E:\\Audiobooks\\ScrollReader',
+            workingPath: 'E:\\Audiobooks\\ScrollReader\\Books',
+            archivePath: 'E:\\Audiobooks\\ScrollReader\\Archive',
             requiredFiles: [
               { key: 'mp3',      label: 'Final MP3',         extensions: ['.mp3'] },
+              { key: 'vtt',      label: 'VTT Transcript',    extensions: ['.vtt'] },
               { key: 'cover',    label: 'Cover Image',        extensions: ['.jpg', '.jpeg', '.png'] },
               { key: 'thumbnail',label: 'Thumbnail',          extensions: ['.jpg', '.jpeg', '.png'], nameHint: 'thumb' },
               { key: 'indesign', label: 'InDesign File',      extensions: ['.indd', '.idml'] },
@@ -159,9 +161,11 @@ async function getStore() {
             icon: '📚',
             color: '#10b981',
             type: 'audiobook',
-            workingPath: 'E:\\Audiobooks\\BodeeBooks',
+            workingPath: 'E:\\Audiobooks\\BodeeBooks\\Books',
+            archivePath: 'E:\\Audiobooks\\BodeeBooks\\Archive',
             requiredFiles: [
               { key: 'mp3',      label: 'Final MP3',         extensions: ['.mp3'] },
+              { key: 'vtt',      label: 'VTT Transcript',    extensions: ['.vtt'] },
               { key: 'cover',    label: 'Cover Image',        extensions: ['.jpg', '.jpeg', '.png'] },
               { key: 'thumbnail',label: 'Thumbnail',          extensions: ['.jpg', '.jpeg', '.png'], nameHint: 'thumb' },
               { key: 'indesign', label: 'InDesign File',      extensions: ['.indd', '.idml'] },
@@ -1223,8 +1227,12 @@ ipcMain.handle('create-folder-structure', async (_, { driveLetter, photosPath, c
     { path: `${root}\\illbehonest\\Archive`,    label: 'illbehonest Archive', icon: '📹', group: "I'll Be Honest", color: '#ef4444' },
     // ── Audiobooks ──
     { path: `${root}\\Audiobooks`,                    label: 'Audiobooks root', icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
-    { path: `${root}\\Audiobooks\\ScrollReader`,      label: 'Scroll Reader',   icon: '📜', group: 'Audiobooks', color: '#f59e0b' },
-    { path: `${root}\\Audiobooks\\BodeeBooks`,        label: 'Bodee Books',     icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\ScrollReader`,            label: 'Scroll Reader',             icon: '📜', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\ScrollReader\\Books`,     label: 'ScrollReader Books',         icon: '📜', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\ScrollReader\\Archive`,   label: 'ScrollReader Archive',       icon: '📜', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\BodeeBooks`,              label: 'Bodee Books',                icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\BodeeBooks\\Books`,       label: 'BodeeBooks Books',           icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\BodeeBooks\\Archive`,     label: 'BodeeBooks Archive',         icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
     // ── Reels ──
     { path: `${root}\\Reels`,                label: 'Reels root',            icon: '🎬', group: 'Reels', color: '#3b82f6' },
     { path: `${root}\\Reels\\scrollreader`, label: 'Reels – Scroll Reader', icon: '🎬', group: 'Reels', color: '#3b82f6' },
@@ -1270,8 +1278,8 @@ ipcMain.handle('create-folder-structure', async (_, { driveLetter, photosPath, c
   const updates = {
     sermons:      { workingPath: `${root}\\gccsatx\\Working`,        archivePath: `${root}\\gccsatx\\Archive` },
     ibh:          { workingPath: `${root}\\illbehonest\\Working`,    archivePath: `${root}\\illbehonest\\Archive` },
-    scrollreader: { workingPath: `${root}\\Audiobooks\\ScrollReader` },
-    bodeebooks:   { workingPath: `${root}\\Audiobooks\\BodeeBooks` },
+    scrollreader: { workingPath: `${root}\\Audiobooks\\ScrollReader\\Books`, archivePath: `${root}\\Audiobooks\\ScrollReader\\Archive` },
+    bodeebooks:   { workingPath: `${root}\\Audiobooks\\BodeeBooks\\Books`,   archivePath: `${root}\\Audiobooks\\BodeeBooks\\Archive` },
     reels:        { workingPath: `${root}\\Reels` },
     photos:       { workingPath: photosPath || path.join(home, 'Pictures') },
     apps:         { workingPath: root },
@@ -1360,16 +1368,11 @@ function makeColorIcoBuffer(color) {
 }
 
 // ── Resolve icon asset dir — copy PNGs from app bundle to userData on first run ──
-// We store them in userData so desktop.ini can always find them at a stable,
-// real (non-asar) absolute path regardless of where FileKeeper is installed.
 let _iconAssetDir = null
 function getIconAssetDir() {
   if (_iconAssetDir) return _iconAssetDir
   const dest = path.join(app.getPath('userData'), 'folder-icons')
   if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true })
-
-  // Source: extraResources puts assets/ at process.resourcesPath/assets/
-  // In dev, they're at __dirname/assets/
   const srcCandidates = [
     path.join(process.resourcesPath || '', 'assets', 'folder-icons'),
     path.join(__dirname, 'assets', 'folder-icons'),
@@ -1377,9 +1380,7 @@ function getIconAssetDir() {
   const src = srcCandidates.find(p => fs.existsSync(p))
   if (src) {
     for (const file of fs.readdirSync(src)) {
-      const destFile = path.join(dest, file)
-      // Always overwrite so updates to icons propagate
-      fs.copyFileSync(path.join(src, file), destFile)
+      fs.copyFileSync(path.join(src, file), path.join(dest, file))
     }
   }
   _iconAssetDir = dest
@@ -1399,55 +1400,64 @@ async function applyIconToFolder(folderPath, color, group) {
     const icoPath = path.join(folderPath, 'folder.ico')
     const iniPath = path.join(folderPath, 'desktop.ini')
 
-    // Build ICO: prefer the real PNG asset, fall back to color circle
-    let icoBuffer
-    const pngPath = getAssetIconPath(group)
-    if (pngPath) {
-      icoBuffer = pngToIco(fs.readFileSync(pngPath))
-    } else {
-      icoBuffer = makeColorIcoBuffer(color || '#6c63ff')
+    // ── Step 1: Always write the solid-color ICO first (guaranteed to work) ──
+    // Each group gets a distinct color so folders are visually unique
+    // even if the PNG-based icons can't be written.
+    const colorIco = makeColorIcoBuffer(color || '#6c63ff')
+    let icoBuffer = colorIco
+    let usedPng = false
+
+    // ── Step 2: Try to upgrade to the nicer PNG icon ──
+    // If this fails for any reason, the color circle is already the fallback.
+    try {
+      const pngPath = getAssetIconPath(group)
+      if (pngPath) {
+        icoBuffer = pngToIco(fs.readFileSync(pngPath))
+        usedPng = true
+      }
+    } catch (pngErr) {
+      console.warn('[icons] PNG upgrade failed, using color circle:', pngErr.message)
+      icoBuffer = colorIco
     }
 
-    // Remove read-only/system flags before writing (in case of re-apply)
-    try { execSync(`attrib -h -s -r "${iniPath}"`, { stdio: 'ignore' }) } catch {}
-    try { execSync(`attrib -h -s -r "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+    // Use PowerShell to clear lock flags before writing
+    const escIni = iniPath.replace(/'/g, "''")
+    const escIco = icoPath.replace(/'/g, "''")
+    const psUnlock = `$items=@('${escIni}','${escIco}');foreach($i in $items){if(Test-Path -LiteralPath $i){(Get-Item -Force -LiteralPath $i).Attributes='Normal'}}`
+    try { execSync(`powershell -NoProfile -Command "${psUnlock}"`, { stdio: 'ignore', timeout: 5000 }) } catch {}
 
     fs.writeFileSync(icoPath, icoBuffer)
 
-    // Write desktop.ini using the stable userData path for the ICO reference
-    // Use the icoPath (inside the target folder) so it's self-contained
-    const ini = `[.ShellClassInfo]\r\nIconResource=${icoPath},0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n`
-    fs.writeFileSync(iniPath, ini, { encoding: 'utf8', flag: 'w' })
+    // Use RELATIVE icon path in desktop.ini — most portable approach
+    const ini = `[.ShellClassInfo]\r\nIconFile=folder.ico\r\nIconIndex=0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n`
+    fs.writeFileSync(iniPath, ini, 'utf8')
 
-    // Set System attribute so Windows reads desktop.ini; hide the files
-    try { execSync(`attrib +r "${folderPath}"`, { stdio: 'ignore' }) } catch {}
-    try { execSync(`attrib +s "${folderPath}"`, { stdio: 'ignore' }) } catch {}
-    try { execSync(`attrib +h +s -r "${iniPath}"`, { stdio: 'ignore' }) } catch {}
-    try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+    // Set attributes via PowerShell
+    const escFolder = folderPath.replace(/'/g, "''")
+    const psAttribs = `$f=Get-Item -Force -LiteralPath '${escFolder}';$f.Attributes=$f.Attributes -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReadOnly;$i=Get-Item -Force -LiteralPath '${escIni}';$i.Attributes=[IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System;$c=Get-Item -Force -LiteralPath '${escIco}';$c.Attributes=[IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System`
+    try { execSync(`powershell -NoProfile -Command "${psAttribs}"`, { stdio: 'pipe', timeout: 8000 }) } catch(e) {
+      // Fallback to cmd attrib
+      try { execSync(`attrib +r +s "${folderPath}"`, { stdio: 'ignore' }) } catch {}
+      try { execSync(`attrib +h +s "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+      try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+    }
 
-    return { success: true, usedPng: !!pngPath }
+    return { success: true, usedPng }
   } catch (e) {
     return { success: false, error: e.message }
   }
 }
 
 function refreshExplorerIconCache() {
-  // Clears the Windows icon cache and restarts the Explorer shell
-  // so custom folder icons appear immediately without a reboot.
+  // SHChangeNotify signals Explorer to reload icons without killing the shell
+  const ps = `Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class SN{[DllImport("shell32.dll")]public static extern void SHChangeNotify(int e,uint f,IntPtr a,IntPtr b);}';[SN]::SHChangeNotify(0x08000000,0,0,0)`
   try {
-    execSync('ie4uinit.exe -ClearIconCache', { stdio: 'ignore', timeout: 5000 })
-  } catch {}
-  try {
-    execSync('ie4uinit.exe -show', { stdio: 'ignore', timeout: 3000 })
-  } catch {}
-  // Soft-restart Explorer shell to pick up the new icons
-  try {
-    execSync('taskkill /f /im explorer.exe', { stdio: 'ignore', timeout: 3000 })
-  } catch {}
-  setTimeout(() => {
-    try { execSync('start explorer.exe', { shell: true, stdio: 'ignore' }) } catch {}
-  }, 1500)
+    execSync(`powershell -NoProfile -Command "${ps}"`, { stdio: 'ignore', timeout: 10000 })
+  } catch {
+    try { execSync('ie4uinit.exe -ClearIconCache', { stdio: 'ignore', timeout: 5000 }) } catch {}
+  }
 }
+
 
 ipcMain.handle('apply-folder-icons', async (_, { folders }) => {
   // folders: [{ path, color, group }]
