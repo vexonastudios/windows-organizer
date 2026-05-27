@@ -67,7 +67,8 @@
       {
         "provider": "github",
         "owner": "vexonastudios",
-        "repo": "windows-organizer"
+        "repo": "windows-organizer",
+        "releaseType": "release"
       }
     ]
   },
