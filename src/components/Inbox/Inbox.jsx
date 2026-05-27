@@ -259,12 +259,56 @@ function FileRow({ file, selected, onSelect, onDelete, onMove, onOpen, onReveal,
 }
 
 // ─── Downloads Triage Mode ───────────────────────────────────────────────────
-function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal, onSkip, onDone }) {
+function DownloadsTriage({ files: initialFiles, workflows, onSendToProject, onDelete, onReveal, onSkip, onDone }) {
+  // Use LOCAL copy of the file list — immune to parent re-fetches mid-triage
+  const [files, setFiles] = useState(initialFiles)
   const [idx, setIdx] = useState(0)
   const [processed, setProcessed] = useState(0)
 
-  const remaining = files.filter((_, i) => i >= idx)
-  const file = remaining[0]
+  const file = files[idx] || null
+
+  const next = () => {
+    setIdx(i => i + 1)
+    setProcessed(p => p + 1)
+  }
+
+  // Remove a file from the local list immediately (no async wait)
+  const removeFile = (filePath) => {
+    setFiles(prev => prev.filter(f => f.path !== filePath))
+    // Don't advance idx — the next file slides into position automatically
+  }
+
+  const handleSend = (filePath, workingPath, label) => {
+    removeFile(filePath)
+    // Fire-and-forget — don't await, don't block the UI
+    onSendToProject(filePath, workingPath, label)
+  }
+
+  const handleDel = (filePaths) => {
+    filePaths.forEach(p => removeFile(p))
+    onDelete(filePaths)
+  }
+
+  const handleSkipLocal = (filePath) => {
+    removeFile(filePath)
+    onSkip(filePath)
+  }
+
+  // Fix #18: keyboard shortcuts in triage mode
+  useEffect(() => {
+    if (!file) return
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (e.key === 'Delete' || e.key.toLowerCase() === 'd') { handleDel([file.path]) }
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onReveal(file.path) }
+      if (e.key.toLowerCase() === 's') { handleSkipLocal(file.path) }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [file])
+
+  const progress = Math.round(((files.length - (files.length - idx)) / Math.max(initialFiles.length, 1)) * 100)
+  const emoji = file ? getFileEmoji(file.type, file.ext) : '✨'
 
   if (!file) {
     return (
@@ -279,23 +323,6 @@ function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal
     )
   }
 
-  const emoji = getFileEmoji(file.type, file.ext)
-  const progress = Math.round((idx / files.length) * 100)
-
-  const next = () => { setIdx(i => i + 1); setProcessed(p => p + 1) }
-
-  // Fix #18: keyboard shortcuts in triage mode
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      if (e.key === 'Delete' || e.key.toLowerCase() === 'd') { onDelete([file.path]); next() }
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onReveal(file.path) }
-      if (e.key.toLowerCase() === 's') { onSkip(file.path); next() }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [file])
-
   return (
     <div style={{ maxWidth: 600, margin: '0 auto', padding: '20px 0' }}>
       {/* Keyboard hint */}
@@ -307,10 +334,10 @@ function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
           <span>⚡ Downloads Triage Mode</span>
-          <span>{idx} of {files.length} done</span>
+          <span>{files.length} remaining</span>
         </div>
         <div style={{ height: 4, background: 'var(--bg-card)', borderRadius: 2 }}>
-          <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg, #8b5cf6, #3b82f6)', borderRadius: 2, transition: 'width 0.3s ease' }} />
+          <div style={{ height: '100%', width: `${Math.max(5, 100 - Math.round((files.length / Math.max(initialFiles.length, 1)) * 100))}%`, background: 'linear-gradient(90deg, #8b5cf6, #3b82f6)', borderRadius: 2, transition: 'width 0.3s ease' }} />
         </div>
       </div>
 
@@ -337,7 +364,7 @@ function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal
           {workflows.filter(w => w.workingPath).map(w => (
             <button
               key={w.id}
-              onClick={() => { onSendToProject(file.path, w.workingPath, w.name); next() }}
+              onClick={() => handleSend(file.path, w.workingPath, w.name)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '10px 14px', borderRadius: 10,
@@ -371,14 +398,14 @@ function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          onClick={() => { onSkip(file.path); next() }}
+          onClick={() => handleSkipLocal(file.path)}
           title="S — remembered until the file changes"
         >
           ⏭ Skip
         </button>
         <button
           className="btn btn-danger btn-sm"
-          onClick={() => { onDelete([file.path]); next() }}
+          onClick={() => handleDel([file.path])}
           title="D or Delete key"
         >
           🗑️ Delete
@@ -388,6 +415,7 @@ function DownloadsTriage({ files, workflows, onSendToProject, onDelete, onReveal
     </div>
   )
 }
+
 
 // ─── Main Inbox ───────────────────────────────────────────────────────────────
 export default function Inbox({ zones, onClear }) {
