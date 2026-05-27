@@ -73,6 +73,15 @@ contextBridge.exposeInMainWorld('filekeeper', {
   scanPhotos: (photosPath) => ipcRenderer.invoke('scan-photos', photosPath),
   organizePhotosByDate: (opts) => ipcRenderer.invoke('organize-photos-by-date', opts),
 
+  // AI Photo Curation (Gemini Vision)
+  saveGeminiKey: (key) => ipcRenderer.invoke('save-gemini-key', key),
+  getGeminiKey: () => ipcRenderer.invoke('get-gemini-key'),
+  estimateAiCost: (opts) => ipcRenderer.invoke('estimate-ai-cost', opts),
+  aiAnalyzeFolder: (opts) => ipcRenderer.invoke('ai-analyze-folder', opts),
+  aiGroupBursts: (opts) => ipcRenderer.invoke('ai-group-bursts', opts),
+  aiMoveRejects: (opts) => ipcRenderer.invoke('ai-move-rejects', opts),
+  aiGetTopics: (opts) => ipcRenderer.invoke('ai-get-topics', opts),
+
   // Apps
   scanApps: (appsPath) => ipcRenderer.invoke('scan-apps', appsPath),
 
@@ -95,7 +104,7 @@ contextBridge.exposeInMainWorld('filekeeper', {
   // Push events from main → renderer
   // Fix #14: wrap fn so off() can remove the exact same reference
   on: (channel, fn) => {
-    const allowed = ['navigate', 'tray-scan', 'auto-sort-moved', 'new-download']
+    const allowed = ['navigate', 'tray-scan', 'auto-sort-moved', 'new-download', 'ai-photo-progress', 'update-available', 'update-downloaded']
     if (!allowed.includes(channel)) return
     const wrapper = (_, ...args) => fn(...args)
     // Store: fn → { channel → wrapper }
@@ -122,4 +131,7 @@ contextBridge.exposeInMainWorld('filekeeper', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
+
+  // Auto-update
+  installUpdate: () => ipcRenderer.invoke('install-update'),
 })

@@ -6,6 +6,44 @@ const crypto = require('crypto')
 
 const isDev = !app.isPackaged
 
+// ─── Auto-Updater ─────────────────────────────────────────────────────────────
+// Only loaded in production — electron-updater checks GitHub Releases for new versions
+let autoUpdater = null
+if (!isDev) {
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+    autoUpdater.autoDownload = true        // download silently in background
+    autoUpdater.autoInstallOnAppQuit = true // install on next quit if not manually triggered
+
+    autoUpdater.logger = {
+      info:  (msg) => console.log('[updater]', msg),
+      warn:  (msg) => console.warn('[updater]', msg),
+      error: (msg) => console.error('[updater]', msg),
+      debug: () => {},
+    }
+
+    autoUpdater.on('update-available', (info) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('update-available', { version: info.version })
+      }
+    })
+
+    autoUpdater.on('update-downloaded', (info) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('update-downloaded', { version: info.version })
+      }
+    })
+
+    autoUpdater.on('error', (err) => {
+      // Log silently — never crash the app over an update error
+      console.error('[updater] error:', err?.message)
+    })
+  } catch (e) {
+    console.warn('[updater] Could not load electron-updater:', e.message)
+  }
+}
+
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 let store
 async function getStore() {
@@ -493,6 +531,12 @@ app.whenReady().then(async () => {
   createTray()
   startAutoSortWatcher()
   scheduleWeeklyCheck()
+  // Check for updates 3s after launch so startup feels instant
+  if (autoUpdater) {
+    setTimeout(() => {
+      try { autoUpdater.checkForUpdates() } catch (e) { console.warn('[updater] check failed:', e.message) }
+    }, 3000)
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 
@@ -1360,3 +1404,246 @@ ipcMain.handle('save-naming-conventions', async (_, conventions) => {
   return true
 })
 
+// ─── Gemini API Key ────────────────────────────────────────────────────────────
+ipcMain.handle('save-gemini-key', async (_, key) => {
+  const s = await getStore()
+  s.set('geminiApiKey', key)
+  return true
+})
+
+ipcMain.handle('get-gemini-key', async () => {
+  const s = await getStore()
+  return s.get('geminiApiKey', '')
+})
+
+// ─── AI Photo Analysis (Gemini Vision) ────────────────────────────────────────
+
+// Read image as base64 for Gemini
+function imageToBase64(filePath) {
+  try {
+    const buf = fs.readFileSync(filePath)
+    return buf.toString('base64')
+  } catch {
+    return null
+  }
+}
+
+// Call Gemini Vision API with a single image
+async function analyzePhotoWithGemini(apiKey, filePath) {
+  const base64 = imageToBase64(filePath)
+  if (!base64) return null
+
+  const ext = path.extname(filePath).toLowerCase()
+  const mimeType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+
+  const prompt = `Analyze this photo and respond with ONLY valid JSON (no markdown, no explanation).
+
+Return exactly this structure:
+{
+  "score": <0-100 overall quality: sharpness, exposure, composition, interest>,
+  "blur": <0-100 where 100=very blurry>,
+  "exposure": <"good"|"overexposed"|"underexposed">,
+  "faces": <number of faces visible>,
+  "tags": [<up to 5 topic tags, e.g. "Birthday","Beach","Portrait","Christmas","Outdoors","Food","Travel","Pet","Sports","Family">],
+  "description": "<one short sentence describing the photo>",
+  "isBest": <true if this is a high quality, memorable shot worth keeping>,
+  "rejectReason": "<blank if good, or brief reason if low quality: 'blurry', 'overexposed', 'duplicate angle', 'eyes closed', etc>"
+}`
+
+  const body = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: base64 } }
+      ]
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 256 }
+  }
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30000),
+      }
+    )
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
+    }
+    const data = await response.json()
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    // Strip markdown code fences if present
+    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    return JSON.parse(clean)
+  } catch (e) {
+    console.error('Gemini analysis failed for', path.basename(filePath), ':', e.message)
+    return null
+  }
+}
+
+// Estimate cost: ~$0.000075 per image (Gemini Flash pricing)
+ipcMain.handle('estimate-ai-cost', async (_, { folderPath }) => {
+  const IMG_EXTS = ['.jpg', '.jpeg', '.png', '.heic', '.webp']
+  const files = scanDirectory(folderPath, false).filter(f => IMG_EXTS.includes(f.ext.toLowerCase()))
+  const count = files.length
+  const costUsd = count * 0.000075
+  return { count, costUsd: costUsd.toFixed(4), costFormatted: `$${costUsd.toFixed(2)}` }
+})
+
+// Main AI analysis handler — streams progress back via IPC events
+ipcMain.handle('ai-analyze-folder', async (_, { folderPath, apiKey }) => {
+  const IMG_EXTS = ['.jpg', '.jpeg', '.png', '.webp']
+  // Scan recursively
+  const allFiles = scanDirectory(folderPath, false).filter(f => IMG_EXTS.includes(f.ext.toLowerCase()))
+
+  const results = []
+  let processed = 0
+
+  for (const file of allFiles) {
+    const analysis = await analyzePhotoWithGemini(apiKey, file.path)
+    processed++
+
+    const result = {
+      path: file.path,
+      name: file.name,
+      size: file.size,
+      sizeFormatted: file.sizeFormatted,
+      mtimeMs: file.mtimeMs,
+      analysis: analysis || { score: 50, blur: 0, exposure: 'good', faces: 0, tags: [], description: '', isBest: true, rejectReason: '' },
+      analysisOk: !!analysis,
+    }
+    results.push(result)
+
+    // Stream progress to renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('ai-photo-progress', {
+        processed,
+        total: allFiles.length,
+        current: file.name,
+        result,
+      })
+    }
+
+    // Small throttle to avoid rate limits
+    await new Promise(r => setTimeout(r, 100))
+  }
+
+  return results
+})
+
+// Group photos into bursts (shots within 10 seconds of each other = same scene)
+function groupIntoBursts(analyzedPhotos) {
+  if (!analyzedPhotos.length) return []
+  const sorted = [...analyzedPhotos].sort((a, b) => a.mtimeMs - b.mtimeMs)
+  const groups = []
+  let current = [sorted[0]]
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1]
+    const curr = sorted[i]
+    const diffSeconds = (curr.mtimeMs - prev.mtimeMs) / 1000
+    if (diffSeconds <= 10) {
+      current.push(curr)
+    } else {
+      groups.push(current)
+      current = [curr]
+    }
+  }
+  groups.push(current)
+
+  return groups.map((photos, idx) => {
+    const best = photos.reduce((a, b) =>
+      (b.analysis?.score || 0) > (a.analysis?.score || 0) ? b : a
+    )
+    const keepers = photos.filter(p => p.path === best.path || (p.analysis?.score || 0) >= 70)
+    const rejects = photos.filter(p => !keepers.find(k => k.path === p.path))
+    const allTags = [...new Set(photos.flatMap(p => p.analysis?.tags || []))]
+    return { id: idx, photos, best, keepers, rejects, tags: allTags }
+  })
+}
+
+ipcMain.handle('ai-group-bursts', async (_, { analyzedPhotos }) => {
+  return groupIntoBursts(analyzedPhotos)
+})
+
+// Move rejects to a _Rejects subfolder
+ipcMain.handle('ai-move-rejects', async (_, { rejectPaths, baseFolder }) => {
+  const rejectsDir = path.join(baseFolder, '_Rejects')
+  if (!fs.existsSync(rejectsDir)) fs.mkdirSync(rejectsDir, { recursive: true })
+
+  const moved = []
+  const errors = []
+  for (const filePath of rejectPaths) {
+    try {
+      const dest = path.join(rejectsDir, path.basename(filePath))
+      fs.renameSync(filePath, dest)
+      moved.push(dest)
+      // Also move paired RAW if it exists
+      const base = path.basename(filePath, path.extname(filePath))
+      const dir = path.dirname(filePath)
+      const RAW_EXTS = ['.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2', '.raf']
+      for (const rawExt of RAW_EXTS) {
+        const rawPath = path.join(dir, base + rawExt)
+        if (fs.existsSync(rawPath)) {
+          const rawDest = path.join(rejectsDir, base + rawExt)
+          fs.renameSync(rawPath, rawDest)
+          moved.push(rawDest)
+          break
+        }
+        const rawPathUpper = path.join(dir, base + rawExt.toUpperCase())
+        if (fs.existsSync(rawPathUpper)) {
+          const rawDest = path.join(rejectsDir, base + rawExt.toUpperCase())
+          fs.renameSync(rawPathUpper, rawDest)
+          moved.push(rawDest)
+          break
+        }
+      }
+    } catch (e) {
+      errors.push({ path: filePath, error: e.message })
+    }
+  }
+
+  const s = await getStore()
+  appendActionLog(s, {
+    id: crypto.randomUUID(),
+    type: 'ai-reject',
+    from: baseFolder,
+    to: rejectsDir,
+    count: moved.length,
+    timestamp: Date.now(),
+  })
+
+  return { moved: moved.length, rejectsDir, errors }
+})
+
+// Get all tags from analyzed photos for the topics sidebar
+ipcMain.handle('ai-get-topics', async (_, { analyzedPhotos }) => {
+  const topicMap = {}
+  for (const photo of analyzedPhotos) {
+    const tags = photo.analysis?.tags || []
+    for (const tag of tags) {
+      if (!topicMap[tag]) topicMap[tag] = []
+      topicMap[tag].push(photo.path)
+    }
+  }
+  return Object.entries(topicMap)
+    .map(([tag, paths]) => ({ tag, count: paths.length, paths }))
+    .sort((a, b) => b.count - a.count)
+})
+
+// ─── Install Update IPC ────────────────────────────────────────────────────────
+// Called by the UI "Restart & Update" button — triggers immediate install
+ipcMain.handle('install-update', () => {
+  if (autoUpdater) {
+    try {
+      isQuitting = true
+      autoUpdater.quitAndInstall(false, true) // isSilent=false, isForceRunAfter=true
+    } catch (e) {
+      console.error('[updater] quitAndInstall failed:', e.message)
+    }
+  }
+})

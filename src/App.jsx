@@ -51,6 +51,16 @@ function AppContent() {
     }
   }, [toast])
 
+  // refreshZones declared early so all useEffects below can safely reference it
+  const refreshZones = useCallback(async () => {
+    const fk = window.filekeeper
+    if (!fk) return
+    const z = await fk.getZones()
+    setZones(z)
+    const files = await fk.getInbox(z)
+    setInboxCount(files.filter(f => f.ageDays <= 30).length)
+  }, [])
+
   // Check if first run
   useEffect(() => {
     const fk = window.filekeeper
@@ -93,14 +103,7 @@ function AppContent() {
     }
   }, [refreshZones]) // Fix #10: refreshZones added to deps so closure is never stale
 
-  const refreshZones = useCallback(async () => {
-    const fk = window.filekeeper
-    if (!fk) return
-    const z = await fk.getZones()
-    setZones(z)
-    const files = await fk.getInbox(z)
-    setInboxCount(files.filter(f => f.ageDays <= 30).length)
-  }, [])
+
 
   const handleSetupComplete = useCallback(async () => {
     const fk = window.filekeeper

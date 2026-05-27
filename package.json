@@ -46,7 +46,10 @@
       "node_modules/electron-store/**/*",
       "node_modules/conf/**/*",
       "node_modules/chokidar/**/*",
-      "node_modules/trash/**/*"
+      "node_modules/trash/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/lazy-val/**/*"
     ],
     "extraResources": [
       {
@@ -59,11 +62,19 @@
     ],
     "directories": {
       "output": "release"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vexonastudios",
+        "repo": "windows-organizer"
+      }
+    ]
   },
   "dependencies": {
     "chokidar": "^3.6.0",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
     "md5-file": "^5.0.0",
     "trash": "^7.2.0"
   },

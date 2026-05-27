@@ -169,10 +169,19 @@ export default function Settings({ zones, onSave, onOpenSetup }) {
   const [saving, setSaving] = useState(false)
   const [healthResult, setHealthResult] = useState(null)
   const [healthRunning, setHealthRunning] = useState(false)
+  const [geminiKey, setGeminiKey] = useState('')
+  const [geminiKeySaved, setGeminiKeySaved] = useState(false)
+  const [geminiKeyTesting, setGeminiKeyTesting] = useState(false)
+  const [geminiKeyVisible, setGeminiKeyVisible] = useState(false)
   const toast = useToast()
   const fk = window.filekeeper
 
   useEffect(() => { setEditedZones(zones) }, [zones])
+
+  // Load saved Gemini key on mount
+  useEffect(() => {
+    fk.getGeminiKey().then(k => { if (k) setGeminiKey(k) })
+  }, [])
 
   const runHealthCheck = async () => {
     setHealthRunning(true)
@@ -345,6 +354,74 @@ export default function Settings({ zones, onSave, onOpenSetup }) {
               style={{ flexShrink: 0 }}
             >
               {healthRunning ? '⏳ Checking…' : '🔍 Run Check Now'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Gemini AI Settings */}
+      <div className="settings-section">
+        <div className="settings-label">🤖 AI Features — Gemini</div>
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
+            <span style={{ fontSize: 36 }}>✨</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Gemini API Key</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+                Powers the AI photo curation — scores photos, finds burst shots, picks the best keeper, and tags by topic.
+                Get a free key at <span style={{ color: 'var(--blue)' }}>aistudio.google.com</span>.
+              </div>
+              <div className="flex gap-sm" style={{ marginBottom: 8 }}>
+                <input
+                  id="input-gemini-key"
+                  className="input"
+                  type={geminiKeyVisible ? 'text' : 'password'}
+                  value={geminiKey}
+                  onChange={e => { setGeminiKey(e.target.value); setGeminiKeySaved(false) }}
+                  placeholder="AIza…"
+                  style={{ flex: 1, fontFamily: 'monospace', fontSize: 13 }}
+                />
+                <button
+                  className="btn btn-ghost btn-sm btn-icon"
+                  title={geminiKeyVisible ? 'Hide' : 'Show'}
+                  onClick={() => setGeminiKeyVisible(v => !v)}
+                >{geminiKeyVisible ? '🙈' : '👁️'}</button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                🔒 Stored locally on your machine only. Never sent anywhere except the Gemini API.
+              </div>
+              {geminiKeySaved && (
+                <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 6 }}>✅ Key saved!</div>
+              )}
+            </div>
+            <button
+              id="btn-save-gemini-key"
+              className="btn btn-primary"
+              style={{ flexShrink: 0 }}
+              disabled={!geminiKey.trim() || geminiKeyTesting}
+              onClick={async () => {
+                setGeminiKeyTesting(true)
+                try {
+                  // Quick test call: just send a tiny blank JPEG and see if we get a response
+                  const res = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey.trim()}`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }] }),
+                    }
+                  )
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                  await fk.saveGeminiKey(geminiKey.trim())
+                  setGeminiKeySaved(true)
+                  toast.success('✅ Gemini key verified and saved!')
+                } catch (e) {
+                  toast.error('❌ Key test failed: ' + e.message)
+                }
+                setGeminiKeyTesting(false)
+              }}
+            >
+              {geminiKeyTesting ? '⏳ Testing…' : '✅ Save & Test'}
             </button>
           </div>
         </div>

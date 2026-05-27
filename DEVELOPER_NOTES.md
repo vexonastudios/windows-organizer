@@ -70,3 +70,38 @@ If you are starting a new editing session, consider picking up these tasks:
 2. **Audiobook Auto-Detect:** Automatically scan the audiobook folder on component load instead of requiring a manual scan click.
 3. **Reels Post Status Tracker:** A Draft/Published toggle per reels video.
 4. **Apps Tab - Open in VSCode:** Wire up the UI button to trigger the existing `open-in-vscode` IPC handler in `main.js`.
+
+---
+
+## 🚀 Releasing a New Version
+
+FileKeeper uses **GitHub Actions + electron-updater** to auto-build and publish releases.
+Installed copies of the app check GitHub for updates on every launch and update silently.
+
+### One-Time Setup (GitHub Secret)
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) → Generate new token (classic)
+2. Give it **`repo`** scope → copy the token
+3. Go to your repo → **Settings → Secrets and Variables → Actions → New repository secret**
+4. Name: `GH_TOKEN` · Value: paste your token → Save
+
+### Releasing a New Version (3 commands)
+```powershell
+# 1. Bump the version in package.json (e.g. "1.0.0" → "1.1.0")
+#    Edit package.json manually, then:
+
+# 2. Commit the version bump
+git add package.json
+git commit -m "chore: bump version to v1.1.0"
+
+# 3. Tag and push — this triggers the GitHub Action automatically
+git tag v1.1.0
+git push origin main --tags
+```
+
+GitHub Actions will then:
+- Build the React frontend (Vite)
+- Package with electron-builder
+- Create a GitHub Release with `FileKeeper Setup 1.1.0.exe` + `latest.yml`
+
+Users running the installed app will be notified automatically on next launch.
+

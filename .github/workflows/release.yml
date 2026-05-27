@@ -1,0 +1,36 @@
+name: Build & Release
+
+# Triggers on any tag push matching v*.*.* (e.g. v1.1.0, v2.0.0)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build React frontend (Vite)
+        run: npm run build
+
+      - name: Package & publish with electron-builder
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          # GitHub token — create this in:
+          # repo Settings → Secrets & Variables → Actions → New repository secret
+          # Name: GH_TOKEN  Value: your Personal Access Token (needs 'repo' scope)
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
