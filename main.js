@@ -1883,3 +1883,16 @@ ipcMain.handle('install-update', () => {
     }
   }
 })
+
+ipcMain.handle('check-for-updates', async () => {
+  const version = app.getVersion()
+  if (!autoUpdater) {
+    return { version, status: 'dev', message: 'Auto-update only runs in the packaged app.' }
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    return { version, status: 'checked', updateInfo: result?.updateInfo || null }
+  } catch (e) {
+    return { version, status: 'error', message: e.message }
+  }
+})

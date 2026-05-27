@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld('filekeeper', {
 
   // Auto-update
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
 
   // Folder icons
   applyFolderIcons: (opts) => ipcRenderer.invoke('apply-folder-icons', opts),

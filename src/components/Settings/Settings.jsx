@@ -40,6 +40,57 @@ function FolderIconsCard() {
   )
 }
 
+function CheckForUpdatesCard() {
+  const [status, setStatus] = useState('idle') // idle | checking | upToDate | available | error
+  const [info, setInfo] = useState(null)
+  const fk = window.filekeeper
+
+  const check = async () => {
+    setStatus('checking')
+    setInfo(null)
+    try {
+      const result = await fk.checkForUpdates()
+      if (result.status === 'dev') {
+        setStatus('upToDate')
+        setInfo(`v${result.version} (dev mode — updates only run in packaged app)`)
+      } else if (result.updateInfo && result.updateInfo.version !== result.version) {
+        setStatus('available')
+        setInfo(`v${result.updateInfo.version} is available — downloading in background…`)
+      } else {
+        setStatus('upToDate')
+        setInfo(`v${result.version} — you're on the latest version!`)
+      }
+    } catch (e) {
+      setStatus('error')
+      setInfo(e.message)
+    }
+  }
+
+  const statusColor = { idle: 'var(--text-muted)', checking: 'var(--blue)', upToDate: 'var(--green)', available: '#f59e0b', error: 'var(--red)' }
+  const statusIcon  = { idle: '🔄', checking: '⏳', upToDate: '✅', available: '⬇️', error: '⚠️' }
+
+  return (
+    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+      <span style={{ fontSize: 36 }}>{statusIcon[status]}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Software Updates</div>
+        <div style={{ color: info ? statusColor[status] : 'var(--text-secondary)', fontSize: 13 }}>
+          {info || 'Check GitHub for a newer version of FileKeeper.'}
+        </div>
+      </div>
+      <button
+        id="btn-check-for-updates"
+        className="btn btn-secondary"
+        onClick={check}
+        disabled={status === 'checking'}
+        style={{ whiteSpace: 'nowrap' }}
+      >
+        {status === 'checking' ? '⏳ Checking…' : '🔄 Check for Updates'}
+      </button>
+    </div>
+  )
+}
+
 const ICONS = ['📥', '🖥️', '🖼️', '🎬', '📄', '🎵', '💻', '📦', '🗃️', '🎨']
 const COLORS = [
   { label: 'Purple',   value: '#6c63ff' },
@@ -491,7 +542,8 @@ export default function Settings({ zones, onSave, onOpenSetup }) {
       {/* About section */}
       <div className="settings-section">
         <div className="settings-label">About</div>
-        <div className="card">
+        <CheckForUpdatesCard />
+        <div className="card" style={{ marginTop: 10 }}>
           <div className="flex gap-md" style={{ alignItems: 'center' }}>
             <span style={{ fontSize: 36 }}>🗂️</span>
             <div>
