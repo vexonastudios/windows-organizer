@@ -148,7 +148,7 @@ export default function SetupWizard({ onComplete }) {
     if (applyIcons) {
       const iconTargets = mapped
         .filter(r => r.status === 'done' && r.color)
-        .map(r => ({ path: r.path, color: r.color }))
+        .map(r => ({ path: r.path, color: r.color, group: r.group }))
       await fk.applyFolderIcons({ folders: iconTargets })
       setIconsDone(true)
     } else {

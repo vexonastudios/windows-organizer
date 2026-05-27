@@ -1291,14 +1291,130 @@ ipcMain.handle('create-folder-structure', async (_, { driveLetter, photosPath, c
 // Falls back gracefully if attrib or desktop.ini write fails.
 const { execSync } = require('child_process')
 
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return { r, g, b }
+// Map workflow group names → PNG asset filename
+const FOLDER_ICON_MAP = {
+  'Church Sermons': 'sermons.png',
+  "I'll Be Honest":  'ibh.png',
+  'Audiobooks':      'audiobooks.png',
+  'Reels':           'reels.png',
+  'Dev Apps':        'apps.png',
+  'Family Photos':   'photos.png',
+  'Downloads':       'downloads.png',
 }
 
-function makeIcoBuffer(color) {
+function pngToIco(pngBuffer) {
+  // Wrap a PNG buffer into a valid ICO container.
+  // Windows Vista+ supports PNG-in-ICO natively (much sharper than BMP).
+  const icoHeader = Buffer.alloc(6)
+  icoHeader.writeUInt16LE(0, 0)   // reserved
+  icoHeader.writeUInt16LE(1, 2)   // type = 1 (ICO)
+  icoHeader.writeUInt16LE(1, 4)   // image count = 1
+
+  const entry = Buffer.alloc(16)
+  entry.writeUInt8(0, 0)          // width  = 0 means 256
+  entry.writeUInt8(0, 1)          // height = 0 means 256
+  entry.writeUInt8(0, 2)          // colorCount
+  entry.writeUInt8(0, 3)          // reserved
+  entry.writeUInt16LE(0, 4)       // planes
+  entry.writeUInt16LE(32, 6)      // bitCount
+  entry.writeUInt32LE(pngBuffer.length, 8)  // bytesInRes
+  entry.writeUInt32LE(22, 12)     // imageOffset (after header + entry)
+
+  return Buffer.concat([icoHeader, entry, pngBuffer])
+}
+
+function makeColorIcoBuffer(color) {
+  // Fallback: solid-color 32x32 ICO (used when PNG asset not found)
+  const hexToRgb = hex => ({
+    r: parseInt(hex.slice(1,3),16),
+    g: parseInt(hex.slice(3,5),16),
+    b: parseInt(hex.slice(5,7),16),
+  })
+  const { r, g, b } = hexToRgb(color)
+  const size = 32
+  const pixelCount = size * size
+  const infoHeader = Buffer.alloc(40)
+  infoHeader.writeUInt32LE(40, 0)
+  infoHeader.writeInt32LE(size, 4)
+  infoHeader.writeInt32LE(size * 2, 8)
+  infoHeader.writeUInt16LE(1, 12)
+  infoHeader.writeUInt16LE(32, 14)
+  infoHeader.writeUInt32LE(0, 16)
+  infoHeader.writeUInt32LE(pixelCount * 4, 20)
+  const xorData = Buffer.alloc(pixelCount * 4)
+  for (let i = 0; i < pixelCount; i++) {
+    const x = i % size, y = Math.floor(i / size)
+    const dist = Math.sqrt((x - size/2) ** 2 + (y - size/2) ** 2)
+    const alpha = dist < size/2 - 1 ? 255 : dist < size/2 ? 128 : 0
+    xorData[i*4+0] = b; xorData[i*4+1] = g; xorData[i*4+2] = r; xorData[i*4+3] = alpha
+  }
+  const andData = Buffer.alloc(((size + 31) >> 5) * 4 * size, 0)
+  const imageData = Buffer.concat([infoHeader, xorData, andData])
+  const icoHeader = Buffer.alloc(6)
+  icoHeader.writeUInt16LE(0,0); icoHeader.writeUInt16LE(1,2); icoHeader.writeUInt16LE(1,4)
+  const entry = Buffer.alloc(16)
+  entry.writeUInt8(size,0); entry.writeUInt8(size,1)
+  entry.writeUInt16LE(1,4); entry.writeUInt16LE(32,6)
+  entry.writeUInt32LE(imageData.length,8); entry.writeUInt32LE(22,12)
+  return Buffer.concat([icoHeader, entry, imageData])
+}
+
+function getAssetIconPath(group) {
+  // Resolve the PNG path — check process.resourcesPath (packaged) then __dirname (dev)
+  const filename = FOLDER_ICON_MAP[group]
+  if (!filename) return null
+  const candidates = [
+    path.join(process.resourcesPath || '', 'assets', 'folder-icons', filename),
+    path.join(__dirname, 'assets', 'folder-icons', filename),
+  ]
+  return candidates.find(p => fs.existsSync(p)) || null
+}
+
+async function applyIconToFolder(folderPath, color, group) {
+  try {
+    const icoPath = path.join(folderPath, 'folder.ico')
+    const iniPath = path.join(folderPath, 'desktop.ini')
+
+    // Build ICO: prefer the real PNG asset, fall back to color circle
+    let icoBuffer
+    const pngPath = getAssetIconPath(group)
+    if (pngPath) {
+      icoBuffer = pngToIco(fs.readFileSync(pngPath))
+    } else {
+      icoBuffer = makeColorIcoBuffer(color || '#6c63ff')
+    }
+    fs.writeFileSync(icoPath, icoBuffer)
+
+    // Hide the ICO file
+    try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+
+    // Write desktop.ini
+    const ini = `[.ShellClassInfo]\r\nIconResource=${icoPath},0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n`
+    fs.writeFileSync(iniPath, ini, 'utf8')
+
+    // Set System attribute on folder so Windows reads desktop.ini
+    try { execSync(`attrib +s "${folderPath}"`, { stdio: 'ignore' }) } catch {}
+    try { execSync(`attrib +h +s "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+
+    return { success: true, usedPng: !!pngPath }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+}
+
+ipcMain.handle('apply-folder-icons', async (_, { folders }) => {
+  // folders: [{ path, color, group }]
+  const results = []
+  for (const { path: folderPath, color, group } of folders) {
+    if (fs.existsSync(folderPath)) {
+      const r = await applyIconToFolder(folderPath, color, group)
+      results.push({ path: folderPath, ...r })
+    }
+  }
+  return results
+})
+
+
   // Build a minimal 32x32 ICO with a single solid color using raw binary
   // ICO header + BMP header + pixel data
   const { r, g, b } = hexToRgb(color)
