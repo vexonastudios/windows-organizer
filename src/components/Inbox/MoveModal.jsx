@@ -11,10 +11,13 @@ export default function MoveModal({ filePaths, zones, onConfirm, onCancel }) {
   }
 
   const handleConfirm = () => {
-    const dest = selected === 'custom' ? customPath : selected
-    if (!dest) return
+    const dest = selected === 'custom' ? customPath.trim() : selected
+    if (!dest) return   // guard: never move to an empty path
     onConfirm(dest)
   }
+
+  // Recomputed so the button's disabled state is always accurate
+  const destIsValid = !!( selected === 'custom' ? customPath.trim() : selected )
 
   // Suggested quick destinations
   const suggestions = [
@@ -63,7 +66,7 @@ export default function MoveModal({ filePaths, zones, onConfirm, onCancel }) {
           <button
             id="btn-confirm-move"
             className="btn btn-primary"
-            disabled={!selected && !customPath}
+            disabled={!destIsValid}
             onClick={handleConfirm}
           >
             Move Here

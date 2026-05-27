@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
 
 const ToastContext = createContext(null)
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
+  const counterRef = useRef(0)
 
   const addToast = useCallback((message, type = 'info') => {
-    const id = Date.now()
+    const id = ++counterRef.current   // monotonic — never collides even on same ms
     setToasts(prev => [...prev, { id, message, type }])
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id))

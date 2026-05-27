@@ -432,6 +432,8 @@ export default function Inbox({ zones, onClear }) {
   const [bulkSendOpen, setBulkSendOpen] = useState(false)    // Fix #3: bulk send modal
   const [confirmDelete, setConfirmDelete] = useState(null)   // Fix #5: confirmation state
   const [skippedPaths, setSkippedPaths] = useState(new Set()) // Fix #17: skip persistence
+  const [sendingPath, setSendingPath] = useState(null)       // in-flight guard for Send
+  const [inboxTotal, setInboxTotal] = useState(0)            // total count from main process
   const toast = useToast()
   const fk = window.filekeeper
 
@@ -440,12 +442,16 @@ export default function Inbox({ zones, onClear }) {
   const load = useCallback(async () => {
     if (!fk || !zones.length) return
     setLoading(true)
-    const [inbox, wfs, skipped] = await Promise.all([
+    const [inboxResult, wfs, skipped] = await Promise.all([
       fk.getInbox(zones),
       fk.getWorkflows(),
-      fk.getSkippedFiles(),    // Fix #17: load persisted skips
+      fk.getSkippedFiles(),
     ])
-    setFiles(inbox)
+    // getInbox now returns {files, total} — handle both shapes for safety
+    const inboxFiles = Array.isArray(inboxResult) ? inboxResult : (inboxResult?.files || [])
+    const total = inboxResult?.total || inboxFiles.length
+    setFiles(inboxFiles)
+    setInboxTotal(total)
     setWorkflows(wfs || [])
     setSkippedPaths(new Set(skipped || []))
     setLoading(false)
@@ -547,13 +553,19 @@ export default function Inbox({ zones, onClear }) {
   }
 
   const handleSendToProject = async (filePath, workingPath, projectName) => {
-    const result = await fk.moveFile(filePath, workingPath)
-    if (result.success) {
-      toast.success(`⚡ Sent to ${projectName}`)
-    } else {
-      toast.error(`Failed: ${result.error}`)
+    if (sendingPath === filePath) return   // prevent double-click double-send
+    setSendingPath(filePath)
+    try {
+      const result = await fk.moveFile(filePath, workingPath)
+      if (result.success) {
+        toast.success(`⚡ Sent to ${projectName}`)
+      } else {
+        toast.error(`Failed: ${result.error}`)
+      }
+      await load()
+    } finally {
+      setSendingPath(null)
     }
-    await load()
   }
 
   // Fix #3: bulk send to workflow — called from BulkSendModal

@@ -7,6 +7,7 @@ function DuplicatesTab({ zones }) {
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(new Set())
   const [selected, setSelected] = useState(new Set())
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const toast = useToast()
   const fk = window.filekeeper
 
@@ -46,9 +47,14 @@ function DuplicatesTab({ zones }) {
   }
 
   const deleteSelected = async () => {
+    setConfirmingDelete(false)
     const paths = Array.from(selected)
-    for (const p of paths) await fk.deleteFile(p)
-    toast.success(`🗑️ ${paths.length} duplicates removed`)
+    // Parallel deletes — much faster than sequential for large sets
+    const results = await Promise.allSettled(paths.map(p => fk.deleteFile(p)))
+    const succeeded = results.filter(r => r.status === 'fulfilled' && r.value?.success).length
+    const failed = results.length - succeeded
+    if (succeeded > 0) toast.success(`🗑️ ${succeeded} duplicate${succeeded > 1 ? 's' : ''} removed`)
+    if (failed > 0) toast.error(`⚠️ ${failed} file${failed > 1 ? 's' : ''} could not be deleted`)
     setSelected(new Set())
     await scan()
   }
@@ -90,9 +96,23 @@ function DuplicatesTab({ zones }) {
             <div className="flex gap-sm">
               <button className="btn btn-ghost btn-sm" onClick={autoSelect}>Auto-select Extras</button>
               {selected.size > 0 && (
-                <button id="btn-delete-dupes" className="btn btn-danger btn-sm" onClick={deleteSelected}>
-                  🗑️ Delete {selected.size} selected
-                </button>
+                confirmingDelete ? (
+                  <>
+                    <span style={{ fontSize: 13, color: 'var(--red)', alignSelf: 'center' }}>
+                      Really delete {selected.size} file{selected.size > 1 ? 's' : ''}?
+                    </span>
+                    <button id="btn-confirm-delete-dupes" className="btn btn-danger btn-sm" onClick={deleteSelected}>
+                      ✓ Yes, Delete
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingDelete(false)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button id="btn-delete-dupes" className="btn btn-danger btn-sm" onClick={() => setConfirmingDelete(true)}>
+                    🗑️ Delete {selected.size} selected
+                  </button>
+                )
               )}
               <button className="btn btn-ghost btn-sm" onClick={scan}>🔄 Rescan</button>
             </div>

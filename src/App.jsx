@@ -57,7 +57,9 @@ function AppContent() {
     if (!fk) return
     const z = await fk.getZones()
     setZones(z)
-    const files = await fk.getInbox(z)
+    const result = await fk.getInbox(z)
+    // getInbox now returns {files, total} — handle both shapes for safety
+    const files = Array.isArray(result) ? result : (result?.files || [])
     setInboxCount(files.filter(f => f.ageDays <= 30).length)
   }, [])
 
@@ -71,18 +73,9 @@ function AppContent() {
     }).catch(() => setSetupChecked(true))
   }, [])
 
-  // Load zones
-  useEffect(() => {
-    const fk = window.filekeeper
-    if (!fk) return
-    fk.getZones().then(z => {
-      setZones(z)
-      fk.getInbox(z).then(files => {
-        const recent = files.filter(f => f.ageDays <= 30)
-        setInboxCount(recent.length)
-      })
-    })
-  }, [])
+  // Load zones on mount — single call via refreshZones
+  useEffect(() => { refreshZones() }, [refreshZones])
+
 
   // Listen for tray navigation events
   useEffect(() => {
@@ -90,8 +83,8 @@ function AppContent() {
     if (!fk?.on) return
     const handleNavigate = (dest) => setPage(dest)
     const handleAutoSortMoved = ({ file, destFolder, label, actionId }) => {
-      // Fix #7: proper toast call (no bad optional chaining) + track action for undo
       toast.info(`📥 Auto-sorted: ${file} → ${label || destFolder}`)
+      // Store the specific actionId so undo targets exactly the right action
       setLastAutoSort({ file, destFolder, actionId })
       refreshZones()
     }
@@ -165,10 +158,9 @@ function AppContent() {
           <button
             className="btn btn-ghost btn-sm"
             onClick={async () => {
-              const log = await window.filekeeper.getActionLog()
-              const action = log.find(a => a.type === 'auto-sort')
-              if (action) {
-                const res = await window.filekeeper.undoAction(action.id)
+              // Use the stored actionId directly — don't search the log blindly
+              if (lastAutoSort?.actionId) {
+                const res = await window.filekeeper.undoAction(lastAutoSort.actionId)
                 if (res.success) {
                   toast.success('↩ Undone — file moved back')
                 } else {

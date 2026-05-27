@@ -305,12 +305,16 @@ function createWindow() {
     if (!isQuitting) {
       e.preventDefault()
       mainWindow.hide()
-      if (tray) {
-        tray.displayBalloon?.({
-          title: 'FileKeeper is still running',
-          content: 'FileKeeper is watching your folders in the background. Right-click the tray icon to quit.',
-          icon: 'info',
-        })
+      // Wrap in try/catch — displayBalloon throws a native Windows exception
+      // when Focus Assist is enabled or the notification service is unavailable.
+      if (tray && typeof tray.displayBalloon === 'function') {
+        try {
+          tray.displayBalloon({
+            title: 'FileKeeper is still running',
+            content: 'FileKeeper is watching your folders in the background. Right-click the tray icon to quit.',
+            icon: 'info',
+          })
+        } catch { /* swallow — balloon notifications are optional */ }
       }
     }
   })
@@ -683,31 +687,43 @@ ipcMain.handle('get-zones', async () => { const s = await getStore(); return s.g
 ipcMain.handle('save-zones', async (_, zones) => { const s = await getStore(); s.set('zones', zones); return true })
 
 ipcMain.handle('scan-zone', async (_, zone) => {
-  const files = scanDirectory(zone.path, true)
-  const health = calcHealthScore(files, zone.rules)
-  const totalSize = files.reduce((a, f) => a + f.size, 0)
-  const oldFiles = files.filter(f => f.ageDays > zone.rules.maxAgeDays)
-  const byType = files.reduce((acc, f) => { acc[f.type] = (acc[f.type] || 0) + 1; return acc }, {})
-  return {
-    zoneId: zone.id,
-    fileCount: files.length,
-    totalSize,
-    totalSizeFormatted: formatBytes(totalSize),
-    health,
-    oldFileCount: oldFiles.length,
-    byType,
-    files: files.slice(0, 200),
+  try {
+    const files = scanDirectory(zone.path, true)
+    const health = calcHealthScore(files, zone.rules)
+    const totalSize = files.reduce((a, f) => a + f.size, 0)
+    const oldFiles = files.filter(f => f.ageDays > zone.rules.maxAgeDays)
+    const byType = files.reduce((acc, f) => { acc[f.type] = (acc[f.type] || 0) + 1; return acc }, {})
+    return {
+      zoneId: zone.id,
+      fileCount: files.length,
+      totalSize,
+      totalSizeFormatted: formatBytes(totalSize),
+      health,
+      oldFileCount: oldFiles.length,
+      byType,
+      files: files.slice(0, 200),
+    }
+  } catch (e) {
+    console.error('[scan-zone] error:', e.message)
+    return { zoneId: zone.id, fileCount: 0, totalSize: 0, totalSizeFormatted: '0 B', health: 100, oldFileCount: 0, byType: {}, files: [], error: e.message }
   }
 })
 
 ipcMain.handle('get-inbox', async (_, zones) => {
-  const allFiles = []
-  for (const zone of zones) {
-    const files = scanDirectory(zone.path, true)
-    files.forEach(f => { f.zoneId = zone.id; f.zoneName = zone.name; f.zoneIcon = zone.icon })
-    allFiles.push(...files)
+  try {
+    const allFiles = []
+    for (const zone of zones) {
+      try {
+        const files = scanDirectory(zone.path, true)
+        files.forEach(f => { f.zoneId = zone.id; f.zoneName = zone.name; f.zoneIcon = zone.icon })
+        allFiles.push(...files)
+      } catch { /* skip inaccessible zone — permission denied etc. */ }
+    }
+    const sorted = allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return { files: sorted.slice(0, 500), total: sorted.length }
+  } catch (e) {
+    return { files: [], total: 0 }
   }
-  return allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 100)
 })
 
 ipcMain.handle('delete-file', async (_, filePath) => {
