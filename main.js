@@ -210,12 +210,22 @@ let tray = null
 let isQuitting = false
 
 function createTray() {
-  // Use a blank icon (1x1 png) if no assets folder — fallback gracefully
+  // In packaged app, extraResources land in process.resourcesPath.
+  // In dev, they're relative to __dirname. Try both.
   let icon
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png')
-  if (fs.existsSync(iconPath)) {
-    icon = nativeImage.createFromPath(iconPath)
-  } else {
+  const iconCandidates = [
+    path.join(process.resourcesPath || '', 'assets', 'tray-icon.png'),
+    path.join(__dirname, 'assets', 'tray-icon.png'),
+  ]
+  const iconPath = iconCandidates.find(p => fs.existsSync(p))
+  if (iconPath) {
+    try {
+      icon = nativeImage.createFromPath(iconPath)
+    } catch {
+      icon = null
+    }
+  }
+  if (!icon || icon.isEmpty()) {
     // 16x16 transparent PNG as base64 fallback
     icon = nativeImage.createFromDataURL(
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADklEQVQ4jWNgGAWkAgABBAABkMrFWQAAAABJRU5ErkJggg=='
@@ -270,7 +280,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: (() => {
+      const candidates = [
+        path.join(process.resourcesPath || '', 'assets', 'icon.png'),
+        path.join(__dirname, 'assets', 'icon.png'),
+      ]
+      return candidates.find(p => fs.existsSync(p)) || candidates[1]
+    })(),
   })
 
   if (isDev) {
