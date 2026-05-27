@@ -137,4 +137,5 @@ contextBridge.exposeInMainWorld('filekeeper', {
 
   // Folder icons
   applyFolderIcons: (opts) => ipcRenderer.invoke('apply-folder-icons', opts),
+  refreshFolderIcons: () => ipcRenderer.invoke('refresh-folder-icons'),
 })

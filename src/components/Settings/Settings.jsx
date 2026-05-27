@@ -1,6 +1,45 @@
 import React, { useState, useEffect } from 'react'
 import { useToast } from '../../context/ToastContext.jsx'
 
+function FolderIconsCard() {
+  const [applying, setApplying] = useState(false)
+  const [done, setDone] = useState(false)
+  const { showToast } = useToast()
+  const handleApply = async () => {
+    setApplying(true)
+    setDone(false)
+    try {
+      await window.filekeeper.refreshFolderIcons()
+      setDone(true)
+      showToast('✅ Folder icons applied! Explorer will refresh momentarily.', 'success')
+    } catch (e) {
+      showToast('⚠️ Could not apply icons: ' + e.message, 'error')
+    } finally {
+      setApplying(false)
+    }
+  }
+  return (
+    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+      <span style={{ fontSize: 36 }}>{done ? '✅' : '🎨'}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Folder Icons</div>
+        <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+          Re-apply custom colored icons to all your workflow folders in Windows Explorer.
+        </div>
+      </div>
+      <button
+        id="btn-reapply-folder-icons"
+        className="btn btn-secondary"
+        onClick={handleApply}
+        disabled={applying}
+        style={{ whiteSpace: 'nowrap' }}
+      >
+        {applying ? '⏳ Applying…' : done ? '✅ Done' : '🎨 Re-apply Icons'}
+      </button>
+    </div>
+  )
+}
+
 const ICONS = ['📥', '🖥️', '🖼️', '🎬', '📄', '🎵', '💻', '📦', '🗃️', '🎨']
 const COLORS = [
   { label: 'Purple',   value: '#6c63ff' },
@@ -430,7 +469,7 @@ export default function Settings({ zones, onSave, onOpenSetup }) {
       {/* Setup Wizard shortcut */}
       <div className="settings-section">
         <div className="settings-label">Setup</div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', marginBottom: 10 }}>
           <span style={{ fontSize: 36 }}>🪄</span>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Setup Wizard</div>
@@ -446,6 +485,7 @@ export default function Settings({ zones, onSave, onOpenSetup }) {
             Run Wizard →
           </button>
         </div>
+        <FolderIconsCard />
       </div>
 
       {/* About section */}

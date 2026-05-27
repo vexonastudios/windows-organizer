@@ -1359,15 +1359,39 @@ function makeColorIcoBuffer(color) {
   return Buffer.concat([icoHeader, entry, imageData])
 }
 
+// ── Resolve icon asset dir — copy PNGs from app bundle to userData on first run ──
+// We store them in userData so desktop.ini can always find them at a stable,
+// real (non-asar) absolute path regardless of where FileKeeper is installed.
+let _iconAssetDir = null
+function getIconAssetDir() {
+  if (_iconAssetDir) return _iconAssetDir
+  const dest = path.join(app.getPath('userData'), 'folder-icons')
+  if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true })
+
+  // Source: extraResources puts assets/ at process.resourcesPath/assets/
+  // In dev, they're at __dirname/assets/
+  const srcCandidates = [
+    path.join(process.resourcesPath || '', 'assets', 'folder-icons'),
+    path.join(__dirname, 'assets', 'folder-icons'),
+  ]
+  const src = srcCandidates.find(p => fs.existsSync(p))
+  if (src) {
+    for (const file of fs.readdirSync(src)) {
+      const destFile = path.join(dest, file)
+      // Always overwrite so updates to icons propagate
+      fs.copyFileSync(path.join(src, file), destFile)
+    }
+  }
+  _iconAssetDir = dest
+  return dest
+}
+
 function getAssetIconPath(group) {
-  // Resolve the PNG path — check process.resourcesPath (packaged) then __dirname (dev)
   const filename = FOLDER_ICON_MAP[group]
   if (!filename) return null
-  const candidates = [
-    path.join(process.resourcesPath || '', 'assets', 'folder-icons', filename),
-    path.join(__dirname, 'assets', 'folder-icons', filename),
-  ]
-  return candidates.find(p => fs.existsSync(p)) || null
+  const iconDir = getIconAssetDir()
+  const p = path.join(iconDir, filename)
+  return fs.existsSync(p) ? p : null
 }
 
 async function applyIconToFolder(folderPath, color, group) {
@@ -1383,18 +1407,23 @@ async function applyIconToFolder(folderPath, color, group) {
     } else {
       icoBuffer = makeColorIcoBuffer(color || '#6c63ff')
     }
+
+    // Remove read-only/system flags before writing (in case of re-apply)
+    try { execSync(`attrib -h -s -r "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+    try { execSync(`attrib -h -s -r "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+
     fs.writeFileSync(icoPath, icoBuffer)
 
-    // Hide the ICO file
-    try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
-
-    // Write desktop.ini
+    // Write desktop.ini using the stable userData path for the ICO reference
+    // Use the icoPath (inside the target folder) so it's self-contained
     const ini = `[.ShellClassInfo]\r\nIconResource=${icoPath},0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n`
-    fs.writeFileSync(iniPath, ini, 'utf8')
+    fs.writeFileSync(iniPath, ini, { encoding: 'utf8', flag: 'w' })
 
-    // Set System attribute on folder so Windows reads desktop.ini
+    // Set System attribute so Windows reads desktop.ini; hide the files
+    try { execSync(`attrib +r "${folderPath}"`, { stdio: 'ignore' }) } catch {}
     try { execSync(`attrib +s "${folderPath}"`, { stdio: 'ignore' }) } catch {}
-    try { execSync(`attrib +h +s "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+    try { execSync(`attrib +h +s -r "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+    try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
 
     return { success: true, usedPng: !!pngPath }
   } catch (e) {
@@ -1402,8 +1431,28 @@ async function applyIconToFolder(folderPath, color, group) {
   }
 }
 
+function refreshExplorerIconCache() {
+  // Clears the Windows icon cache and restarts the Explorer shell
+  // so custom folder icons appear immediately without a reboot.
+  try {
+    execSync('ie4uinit.exe -ClearIconCache', { stdio: 'ignore', timeout: 5000 })
+  } catch {}
+  try {
+    execSync('ie4uinit.exe -show', { stdio: 'ignore', timeout: 3000 })
+  } catch {}
+  // Soft-restart Explorer shell to pick up the new icons
+  try {
+    execSync('taskkill /f /im explorer.exe', { stdio: 'ignore', timeout: 3000 })
+  } catch {}
+  setTimeout(() => {
+    try { execSync('start explorer.exe', { shell: true, stdio: 'ignore' }) } catch {}
+  }, 1500)
+}
+
 ipcMain.handle('apply-folder-icons', async (_, { folders }) => {
   // folders: [{ path, color, group }]
+  // Pre-copy PNG assets to userData so paths are always real
+  getIconAssetDir()
   const results = []
   for (const { path: folderPath, color, group } of folders) {
     if (fs.existsSync(folderPath)) {
@@ -1411,8 +1460,41 @@ ipcMain.handle('apply-folder-icons', async (_, { folders }) => {
       results.push({ path: folderPath, ...r })
     }
   }
+  // Refresh Explorer so icons appear immediately
+  refreshExplorerIconCache()
   return results
 })
+
+// Re-apply icons on demand (e.g. from Settings page)
+ipcMain.handle('refresh-folder-icons', async () => {
+  const s = await getStore()
+  const workflows = s.get('workflows', [])
+  const iconMap = {
+    sermons:      { group: 'Church Sermons', color: '#8b5cf6' },
+    ibh:          { group: "I'll Be Honest",  color: '#ef4444' },
+    scrollreader: { group: 'Audiobooks',      color: '#f59e0b' },
+    bodeebooks:   { group: 'Audiobooks',      color: '#f59e0b' },
+    reels:        { group: 'Reels',           color: '#3b82f6' },
+    apps:         { group: 'Dev Apps',        color: '#a855f7' },
+    photos:       { group: 'Family Photos',   color: '#06b6d4' },
+  }
+  getIconAssetDir()
+  const results = []
+  for (const w of workflows) {
+    const meta = iconMap[w.id]
+    if (!meta) continue
+    for (const key of ['workingPath', 'archivePath']) {
+      const p = w[key]
+      if (p && fs.existsSync(p)) {
+        const r = await applyIconToFolder(p, meta.color, meta.group)
+        results.push({ path: p, ...r })
+      }
+    }
+  }
+  refreshExplorerIconCache()
+  return results
+})
+
 
 
 
