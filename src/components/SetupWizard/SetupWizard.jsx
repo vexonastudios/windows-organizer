@@ -108,22 +108,26 @@ function FolderRow({ result }) {
 export default function SetupWizard({ onComplete }) {
   const [step, setStep] = useState('welcome') // welcome | configure | creating | done
   const [driveLetter, setDriveLetter] = useState('E:')
+  const [rootFolder, setRootFolder] = useState('Projects')
   const [photosOnC, setPhotosOnC] = useState(true)
+  const [applyIcons, setApplyIcons] = useState(true)
   const [folderResults, setFolderResults] = useState([])
   const [stats, setStats] = useState({ created: 0, existed: 0, errors: 0 })
+  const [iconsDone, setIconsDone] = useState(false)
 
   const handleCreate = async () => {
     setStep('creating')
     const fk = window.filekeeper
     const photosPath = photosOnC ? null : `${driveLetter}\\Photos`
 
-    const result = await fk.createFolderStructure({ driveLetter, photosPath })
+    const result = await fk.createFolderStructure({ driveLetter, photosPath, rootFolder })
 
     // Animate results in
     const mapped = result.results.map(r => ({
       path: r.path,
       label: r.label,
       group: r.group,
+      color: r.color,
       status: r.success ? 'done' : 'error',
       existed: r.existed,
       error: r.error,
@@ -139,7 +143,19 @@ export default function SetupWizard({ onComplete }) {
     setFolderResults(mapped)
     setStats({ created, existed, errors })
     setStep('done')
+
+    // Apply icons in the background
+    if (applyIcons) {
+      const iconTargets = mapped
+        .filter(r => r.status === 'done' && r.color)
+        .map(r => ({ path: r.path, color: r.color }))
+      await fk.applyFolderIcons({ folders: iconTargets })
+      setIconsDone(true)
+    } else {
+      setIconsDone(true)
+    }
   }
+
 
   // ─── Step: Welcome ────────────────────────────────────────────────────────
   if (step === 'welcome') {
@@ -244,7 +260,33 @@ export default function SetupWizard({ onComplete }) {
             </div>
           </div>
 
+          {/* Root folder name */}
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Root Folder Name
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px 0 0 8px', padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                {driveLetter}\
+              </div>
+              <input
+                id="input-root-folder"
+                className="input"
+                value={rootFolder}
+                onChange={e => setRootFolder(e.target.value.replace(/[<>:"/\\|?*]/g, ''))}
+                placeholder="Projects"
+                style={{ borderRadius: '0 8px 8px 0', borderLeft: 'none', flex: 1, fontFamily: 'monospace', fontSize: 14, fontWeight: 700 }}
+              />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+              All your work folders will live inside{' '}
+              <code style={{ color: 'var(--blue)' }}>{driveLetter}\{rootFolder || 'Projects'}\</code>
+              {' '}— keeps your drive root tidy.
+            </div>
+          </div>
+
           {/* Photos location */}
+
           <div style={{ marginBottom: 32 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Family Photos Location
@@ -273,10 +315,34 @@ export default function SetupWizard({ onComplete }) {
             </div>
           </div>
 
+          {/* Apply icons toggle */}
+          <div style={{ marginBottom: 32, display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer' }}
+            onClick={() => setApplyIcons(v => !v)}
+          >
+            <div style={{
+              width: 42, height: 24, borderRadius: 12,
+              background: applyIcons ? 'var(--blue)' : 'rgba(255,255,255,0.1)',
+              position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+            }}>
+              <div style={{
+                position: 'absolute', top: 3, left: applyIcons ? 20 : 3,
+                width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                transition: 'left 0.2s',
+              }} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>🎨 Set custom folder icons</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                Each folder gets a unique colored icon in Windows Explorer — purple for sermons, red for IBH, etc.
+              </div>
+            </div>
+          </div>
+
           {/* Preview of what will be created */}
+
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 32 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              📋 Folders to be created on {driveLetter}
+              📋 Folders to be created · <code style={{ color: 'var(--blue)', textTransform: 'none', fontWeight: 400 }}>{driveLetter}\{rootFolder || 'Projects'}\</code>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {FOLDER_GROUPS.map(group => (
@@ -374,7 +440,17 @@ export default function SetupWizard({ onComplete }) {
             </div>
           </div>
 
+          {applyIcons && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10, marginBottom: 20, background: iconsDone ? 'rgba(16,217,138,0.06)' : 'rgba(108,99,255,0.06)', border: `1px solid ${iconsDone ? 'rgba(16,217,138,0.3)' : 'rgba(108,99,255,0.2)'}` }}>
+              {iconsDone ? <span style={{ fontSize: 18 }}>✅</span> : <div className="spinner" style={{ width: 18, height: 18, flexShrink: 0 }} />}
+              <div style={{ fontSize: 13, color: iconsDone ? 'var(--green)' : 'var(--text-secondary)' }}>
+                {iconsDone ? 'Custom folder icons applied — open Explorer to see them!' : 'Applying colored folder icons…'}
+              </div>
+            </div>
+          )}
+
           {/* Results by group */}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 32 }}>
             {Object.entries(grouped).map(([groupName, results]) => {
               const groupInfo = FOLDER_GROUPS.find(g => g.label === groupName) || {}

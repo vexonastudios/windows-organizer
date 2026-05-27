@@ -1201,9 +1201,197 @@ ipcMain.handle('create-folder', async (_, folderPath) => {
 })
 
 // Create the full folder structure given a drive root
-ipcMain.handle('create-folder-structure', async (_, { driveLetter, photosPath, customMappings }) => {
+ipcMain.handle('create-folder-structure', async (_, { driveLetter, photosPath, customMappings, rootFolder }) => {
   const drive = driveLetter.replace(/[\\/]+$/, '') // e.g. 'E:'
   const home = os.homedir()
+
+  // If a rootFolder name is given, all drive-based paths nest inside it
+  // e.g. rootFolder='Projects' → E:\Projects\gccsatx instead of E:\gccsatx
+  const root = rootFolder && rootFolder.trim()
+    ? `${drive}\\${rootFolder.trim()}`
+    : drive
+
+  // Build the folder list
+  const folders = [
+    // ── Sermons ──
+    { path: `${root}\\gccsatx`,          label: 'gccsatx root',          icon: '🎙️', group: 'Church Sermons', color: '#8b5cf6' },
+    { path: `${root}\\gccsatx\\Working`, label: 'gccsatx Working',       icon: '🎙️', group: 'Church Sermons', color: '#8b5cf6' },
+    { path: `${root}\\gccsatx\\Archive`, label: 'gccsatx Archive',       icon: '🎙️', group: 'Church Sermons', color: '#8b5cf6' },
+    // ── IBH ──
+    { path: `${root}\\illbehonest`,             label: 'illbehonest root',    icon: '📹', group: "I'll Be Honest", color: '#ef4444' },
+    { path: `${root}\\illbehonest\\Working`,    label: 'illbehonest Working', icon: '📹', group: "I'll Be Honest", color: '#ef4444' },
+    { path: `${root}\\illbehonest\\Archive`,    label: 'illbehonest Archive', icon: '📹', group: "I'll Be Honest", color: '#ef4444' },
+    // ── Audiobooks ──
+    { path: `${root}\\Audiobooks`,                    label: 'Audiobooks root', icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\ScrollReader`,      label: 'Scroll Reader',   icon: '📜', group: 'Audiobooks', color: '#f59e0b' },
+    { path: `${root}\\Audiobooks\\BodeeBooks`,        label: 'Bodee Books',     icon: '📚', group: 'Audiobooks', color: '#f59e0b' },
+    // ── Reels ──
+    { path: `${root}\\Reels`,                label: 'Reels root',            icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    { path: `${root}\\Reels\\scrollreader`, label: 'Reels – Scroll Reader', icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    { path: `${root}\\Reels\\bodeebooks`,   label: 'Reels – Bodee Books',   icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    { path: `${root}\\Reels\\illbehonest`,  label: 'Reels – IBH',           icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    { path: `${root}\\Reels\\hearhim`,      label: 'Reels – Hear Him',      icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    { path: `${root}\\Reels\\gccsatx`,      label: 'Reels – GCC SATX',      icon: '🎬', group: 'Reels', color: '#3b82f6' },
+    // ── Apps ──
+    { path: `${root}\\apps`, label: 'AntiGravity Apps', icon: '💻', group: 'Dev Apps', color: '#a855f7' },
+    // ── Downloads Staging (always in Windows Downloads — not nested in root) ──
+    { path: `${home}\\Downloads\\Staging`,           label: 'Downloads Staging root', icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    { path: `${home}\\Downloads\\Staging\\Video`,    label: 'Staging – Video',        icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    { path: `${home}\\Downloads\\Staging\\Photos`,   label: 'Staging – Photos',       icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    { path: `${home}\\Downloads\\Staging\\RAW`,      label: 'Staging – RAW Photos',   icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    { path: `${home}\\Downloads\\Staging\\Audio`,    label: 'Staging – Audio',        icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    { path: `${home}\\Downloads\\Staging\\PDFs`,     label: 'Staging – PDFs',         icon: '📥', group: 'Downloads', color: '#6c63ff' },
+    // ── Photos ──
+    { path: photosPath || `${home}\\Pictures`, label: 'Family Photos', icon: '📷', group: 'Family Photos', color: '#06b6d4' },
+  ]
+
+  // Apply any custom overrides
+  if (customMappings) {
+    for (const [key, val] of Object.entries(customMappings)) {
+      const idx = folders.findIndex(f => f.label === key)
+      if (idx !== -1) folders[idx].path = val
+    }
+  }
+
+  const results = []
+  for (const folder of folders) {
+    try {
+      const existed = fs.existsSync(folder.path)
+      if (!existed) fs.mkdirSync(folder.path, { recursive: true })
+      results.push({ ...folder, success: true, existed })
+    } catch (e) {
+      results.push({ ...folder, success: false, error: e.message, existed: false })
+    }
+  }
+
+  // Auto-update workflows in store to use the new real paths
+  const s = await getStore()
+  const workflows = s.get('workflows')
+  const updates = {
+    sermons:      { workingPath: `${root}\\gccsatx\\Working`,        archivePath: `${root}\\gccsatx\\Archive` },
+    ibh:          { workingPath: `${root}\\illbehonest\\Working`,    archivePath: `${root}\\illbehonest\\Archive` },
+    scrollreader: { workingPath: `${root}\\Audiobooks\\ScrollReader` },
+    bodeebooks:   { workingPath: `${root}\\Audiobooks\\BodeeBooks` },
+    reels:        { workingPath: `${root}\\Reels` },
+    photos:       { workingPath: photosPath || path.join(home, 'Pictures') },
+    apps:         { workingPath: root },
+  }
+  const updatedWorkflows = workflows.map(w => updates[w.id] ? { ...w, ...updates[w.id] } : w)
+  s.set('workflows', updatedWorkflows)
+  s.set('autoSortSourcePath', path.join(home, 'Downloads'))
+  s.set('hasCompletedSetup', true)
+  // Save rootFolder so Settings can display it
+  if (rootFolder && rootFolder.trim()) s.set('rootFolder', `${drive}\\${rootFolder.trim()}`)
+
+  return { results, updatedWorkflows }
+})
+
+// ─── Apply custom folder icons via desktop.ini ────────────────────────────────
+// Writes a colored folder icon for each path using a generated PNG → ICO approach.
+// Falls back gracefully if attrib or desktop.ini write fails.
+const { execSync } = require('child_process')
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return { r, g, b }
+}
+
+function makeIcoBuffer(color) {
+  // Build a minimal 32x32 ICO with a single solid color using raw binary
+  // ICO header + BMP header + pixel data
+  const { r, g, b } = hexToRgb(color)
+  const size = 32
+  const pixelCount = size * size
+  // BMP InfoHeader (40 bytes)
+  const infoHeader = Buffer.alloc(40)
+  infoHeader.writeUInt32LE(40, 0)       // biSize
+  infoHeader.writeInt32LE(size, 4)      // biWidth
+  infoHeader.writeInt32LE(size * 2, 8)  // biHeight (double for ICO)
+  infoHeader.writeUInt16LE(1, 12)       // biPlanes
+  infoHeader.writeUInt16LE(32, 14)      // biBitCount (32bpp BGRA)
+  infoHeader.writeUInt32LE(0, 16)       // biCompression (BI_RGB)
+  infoHeader.writeUInt32LE(pixelCount * 4, 20) // biSizeImage
+
+  // XOR pixel data (BGRA rows, bottom-up)
+  const xorData = Buffer.alloc(pixelCount * 4)
+  for (let i = 0; i < pixelCount; i++) {
+    // Round corners: compute distance from center
+    const x = i % size
+    const y = Math.floor(i / size)
+    const cx = size / 2, cy = size / 2
+    const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+    const alpha = dist < size / 2 - 1 ? 255 : dist < size / 2 ? 128 : 0
+    xorData[i * 4 + 0] = b       // Blue
+    xorData[i * 4 + 1] = g       // Green
+    xorData[i * 4 + 2] = r       // Red
+    xorData[i * 4 + 3] = alpha   // Alpha
+  }
+
+  // AND mask (1bpp, all transparent) — 32 rows of 32 bits = 128 bytes
+  const andData = Buffer.alloc(((size + 31) >> 5) * 4 * size, 0)
+
+  const imageData = Buffer.concat([infoHeader, xorData, andData])
+
+  // ICO header (6 bytes) + ICONDIRENTRY (16 bytes)
+  const icoHeader = Buffer.alloc(6)
+  icoHeader.writeUInt16LE(0, 0)   // reserved
+  icoHeader.writeUInt16LE(1, 2)   // type=1 (ICO)
+  icoHeader.writeUInt16LE(1, 4)   // count=1
+
+  const entry = Buffer.alloc(16)
+  entry.writeUInt8(size, 0)       // width
+  entry.writeUInt8(size, 1)       // height
+  entry.writeUInt8(0, 2)          // colorCount
+  entry.writeUInt8(0, 3)          // reserved
+  entry.writeUInt16LE(1, 4)       // planes
+  entry.writeUInt16LE(32, 6)      // bitCount
+  entry.writeUInt32LE(imageData.length, 8)  // bytesInRes
+  entry.writeUInt32LE(6 + 16, 12) // imageOffset
+
+  return Buffer.concat([icoHeader, entry, imageData])
+}
+
+async function applyIconToFolder(folderPath, color) {
+  try {
+    const icoName = 'folder.ico'
+    const icoPath = path.join(folderPath, icoName)
+    const iniPath = path.join(folderPath, 'desktop.ini')
+
+    // Write the ICO file
+    fs.writeFileSync(icoPath, makeIcoBuffer(color))
+
+    // Hide the ICO so it doesn't clutter the folder
+    try { execSync(`attrib +h +s "${icoPath}"`, { stdio: 'ignore' }) } catch {}
+
+    // Write desktop.ini
+    const ini = `[.ShellClassInfo]\r\nIconResource=${icoPath},0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n`
+    fs.writeFileSync(iniPath, ini, 'utf8')
+
+    // Set folder attributes so Windows reads the desktop.ini
+    try { execSync(`attrib +s "${folderPath}"`, { stdio: 'ignore' }) } catch {}
+    try { execSync(`attrib +h +s "${iniPath}"`, { stdio: 'ignore' }) } catch {}
+
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+}
+
+ipcMain.handle('apply-folder-icons', async (_, { folders }) => {
+  // folders: [{ path, color }]
+  const results = []
+  for (const { path: folderPath, color } of folders) {
+    if (fs.existsSync(folderPath)) {
+      const r = await applyIconToFolder(folderPath, color || '#6c63ff')
+      results.push({ path: folderPath, ...r })
+    }
+  }
+  return results
+})
+
+
 
   // Build the folder list
   const folders = [
